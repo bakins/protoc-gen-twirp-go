@@ -383,14 +383,13 @@ func New{{ .GoName }}TwirpServer(implementation {{ .GoName }}TwirpService, opts 
 
 	pathPrefix := path.Clean(path.Join("/", serverOpts.PathPrefix(), "{{ $package }}.{{ .Name }}")) + "/"
 
-	var interceptors []twirp.Interceptor
-	for _, interceptor := range serverOpts.Interceptors {
-		interceptors = append(interceptors, interceptor)
+	interceptors := []twirp.Interceptor {
+		twirpPanicInterceptor,
+		twirpContextInterceptor,
 	}
 
-	interceptors = append(interceptors, twirpPanicInterceptor)
-	interceptors = append(interceptors, twirpContextInterceptor)
-
+	interceptors = append(interceptors, serverOpts.Interceptors...) 
+	
 	s:= &{{ .GoName }}TwirpServer{
 		implementation: implementation,
 		interceptor: twirp.ChainInterceptors(interceptors...),

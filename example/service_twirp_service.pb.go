@@ -375,13 +375,12 @@ func NewHaberdasherTwirpServer(implementation HaberdasherTwirpService, opts ...i
 
 	pathPrefix := path.Clean(path.Join("/", serverOpts.PathPrefix(), "twitch.twirp.example.Haberdasher")) + "/"
 
-	var interceptors []twirp.Interceptor
-	for _, interceptor := range serverOpts.Interceptors {
-		interceptors = append(interceptors, interceptor)
+	interceptors := []twirp.Interceptor{
+		twirpPanicInterceptor,
+		twirpContextInterceptor,
 	}
 
-	interceptors = append(interceptors, twirpPanicInterceptor)
-	interceptors = append(interceptors, twirpContextInterceptor)
+	interceptors = append(interceptors, serverOpts.Interceptors...)
 
 	s := &HaberdasherTwirpServer{
 		implementation: implementation,
