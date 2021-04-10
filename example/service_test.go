@@ -3,6 +3,7 @@ package example
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -47,6 +48,27 @@ func TestClient(t *testing.T) {
 	require.NoError(t, err)
 
 	doTests(t, c)
+}
+
+func TestServerPanic(t *testing.T) {
+	ts := NewHaberdasherTwirpServer(&panicHaberdasher{})
+	svr := httptest.NewServer(ts)
+	defer svr.Close()
+
+	c := NewHaberdasherProtobufClient(svr.URL, http.DefaultClient)
+
+	_, err := c.MakeHat(context.Background(), &Size{Inches: -1})
+	require.Error(t, err)
+	twerr, ok := err.(twirp.Error)
+	require.True(t, ok)
+	require.Equal(t, twirp.Internal, twerr.Code())
+	require.Equal(t, "internal service panic", twerr.Msg())
+}
+
+type panicHaberdasher struct{}
+
+func (h *panicHaberdasher) MakeHat(ctx context.Context, size *Size) (*Hat, error) {
+	panic(errors.New("very bad things happened"))
 }
 
 type testHaberdasher struct{}

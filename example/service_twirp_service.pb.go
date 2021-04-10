@@ -14,11 +14,11 @@ import (
 	"strings"
 	"sync"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/twitchtv/twirp"
 	"github.com/twitchtv/twirp/ctxsetters"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	jsoniter "github.com/json-iterator/go"
 )
 
 var jsonCodec = jsoniter.ConfigCompatibleWithStandardLibrary
@@ -153,20 +153,21 @@ func twirpErrFromPanic(p interface{}) error {
 	return fmt.Errorf("panic: %v", p)
 }
 
-func twirpEnsurePanicResponses(ctx context.Context, resp http.ResponseWriter, hooks *twirp.ServerHooks) {
-	if r := recover(); r != nil {
-		err := twirpErrFromPanic(r)
-		twerr := twirp.NewError(twirp.Internal, "Internal service panic")
-		twerr = twirp.WrapError(twerr, err)
+func twirpPanicInterceptor(method twirp.Method) twirp.Method {
+	return func(ctx context.Context, request interface{}) (resp interface{}, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				panicError := twirpErrFromPanic(r)
+				twerr := twirp.NewError(twirp.Internal, "internal service panic")
+				twerr = twirp.WrapError(twerr, panicError)
 
-		twirpWriteError(ctx, resp, twerr, hooks)
+				resp = nil
+				err = twerr
+			}
+		}()
 
-		f, ok := resp.(http.Flusher)
-		if ok {
-			f.Flush()
-		}
-
-		panic(r)
+		resp, err = method(ctx, request)
+		return resp, err
 	}
 }
 
@@ -353,9 +354,16 @@ func NewHaberdasherTwirpServer(implementation HaberdasherTwirpService, opts ...i
 
 	pathPrefix := path.Clean(path.Join("/", serverOpts.PathPrefix(), "twitch.twirp.example.Haberdasher")) + "/"
 
+	var interceptors []twirp.Interceptor
+	for _, interceptor := range serverOpts.Interceptors {
+		interceptors = append(interceptors, interceptor)
+	}
+
+	interceptors = append(interceptors, twirpPanicInterceptor)
+
 	s := &HaberdasherTwirpServer{
 		implementation: implementation,
-		interceptor:    twirp.ChainInterceptors(serverOpts.Interceptors...),
+		interceptor:    twirp.ChainInterceptors(interceptors...),
 		hooks:          serverOpts.Hooks,
 		pathPrefix:     pathPrefix,
 		codecs:         twirpOpts.codecs,
@@ -486,11 +494,13 @@ func (s *HaberdasherTwirpServer) callMakeHat(ctx context.Context, resp http.Resp
 		}
 	}
 
-	var respContent *Hat
-	func() {
-		defer twirpEnsurePanicResponses(ctx, resp, s.hooks)
-		respContent, err = handler(ctx, reqContent)
-	}()
+	//var respContent *Hat
+	//func() {
+	//	defer twirpEnsurePanicResponses(ctx, resp, s.hooks)
+	//	respContent, err = handler(ctx, reqContent)
+	//}()
+
+	respContent, err := handler(ctx, reqContent)
 
 	if err != nil {
 		s.writeError(ctx, resp, err)
