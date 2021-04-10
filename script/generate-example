@@ -1,0 +1,7 @@
+#!/bin/bash
+set -eu
+
+go install . 
+protoc --twirp-go_out=./example/ --twirp_out=./example --go_out=./example/ -I ./example/ ./example/service.proto
+
+mv ./example/github.com/bakins/protoc-gen-twirp-go/example/*.go ./example/
