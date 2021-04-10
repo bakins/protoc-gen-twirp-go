@@ -522,7 +522,7 @@ func (s *HaberdasherTwirpServer) callMakeHat(ctx context.Context, resp http.Resp
 
 	if err := codec.MarshalTo(ctx, respContent, buff); err != nil {
 		twerr := twirp.InternalError("failed to marshal response")
-		twerr = twirp.WrapError(twerr, err)
+		twerr = twerr.WithMeta("cause", err.Error())
 		s.writeError(ctx, resp, twerr)
 		return
 	}
@@ -617,13 +617,13 @@ func (c *HaberdasherTwirpClient) doRequest(ctx context.Context, req *http.Reques
 
 	if err := c.codec.MarshalTo(ctx, in, buff); err != nil {
 		twerr := twirp.NewError(twirp.Internal, "failed to marshal request")
-		twerr = twirp.WrapError(twerr, err)
+		twerr = twerr.WithMeta("cause", err.Error())
 		return nil, twerr
 	}
 
 	if err := ctx.Err(); err != nil {
 		twerr := twirp.NewError(twirp.Internal, "aborted because context was done")
-		twerr = twirp.WrapError(twerr, err)
+		twerr = twerr.WithMeta("cause", err.Error())
 		return nil, twerr
 	}
 
