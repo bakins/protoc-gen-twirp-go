@@ -4,6 +4,7 @@ package {{ .Package }}
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -161,7 +162,7 @@ func twirpPanicInterceptor(method twirp.Method) twirp.Method {
 			if r := recover(); r != nil {
 				panicError := twirpErrFromPanic(r)
 				twerr := twirp.NewError(twirp.Internal, "internal service panic")
-				twerr = twirp.WrapError(twerr, panicError)
+				twerr = twerr.WithMeta("cause", panicError.Error())
 				
 				resp = nil
 				err = twerr
@@ -172,6 +173,27 @@ func twirpPanicInterceptor(method twirp.Method) twirp.Method {
 		return resp, err
 	}
 }
+
+func twirpContextInterceptor(method twirp.Method) twirp.Method {
+	return func(ctx context.Context, request interface{}) (interface{}, error) {
+		resp, err := method(ctx, request)
+		
+		if errors.Is(err, context.Canceled) {
+			twerr := twirp.NewError(twirp.Canceled, "context cancelled")
+			twerr = twerr.WithMeta("cause", err.Error())
+			return nil, twerr
+		}
+
+		if errors.Is(err, context.DeadlineExceeded) {
+			twerr := twirp.NewError(twirp.DeadlineExceeded, "context deadline exceeded")
+			twerr = twerr.WithMeta("cause", err.Error())
+			return nil, twerr
+		}
+
+		return resp, err
+	}
+}
+
 
 func twirpWriteError(ctx context.Context, resp http.ResponseWriter, err error, hooks *twirp.ServerHooks) {
 	twerr, ok := err.(twirp.Error)
@@ -367,6 +389,7 @@ func New{{ .GoName }}TwirpServer(implementation {{ .GoName }}TwirpService, opts 
 	}
 
 	interceptors = append(interceptors, twirpPanicInterceptor)
+	interceptors = append(interceptors, twirpContextInterceptor)
 
 	s:= &{{ .GoName }}TwirpServer{
 		implementation: implementation,
@@ -444,22 +467,6 @@ func (s *{{ $service.GoName }}TwirpServer)getCodec(req *http.Request)(TwirpCodec
 	return codec, nil
 }
 
-func (s *{{ $service.GoName }}TwirpServer) handleRequestBodyError(ctx context.Context, resp http.ResponseWriter, msg string, err error) {
-	if context.Canceled == ctx.Err() {
-		s.writeError(ctx, resp, twirp.NewError(twirp.Canceled, "failed to read request: context canceled"))
-		return
-	}
-
-	if context.DeadlineExceeded == ctx.Err() {
-		s.writeError(ctx, resp, twirp.NewError(twirp.DeadlineExceeded, "failed to read request: deadline exceeded"))
-		return
-	}
-
-	twerr := twirp.WrapError(twirp.NewError(twirp.Malformed, msg), err)
-
-	s.writeError(ctx, resp, twerr)
-}
-
 {{range $method := .Methods }}	
 func (s *{{ $service.GoName }}TwirpServer)call{{ .GoName }}(ctx context.Context, resp http.ResponseWriter, req *http.Request) {
 	codec, err := s.getCodec(req)
@@ -478,7 +485,9 @@ func (s *{{ $service.GoName }}TwirpServer)call{{ .GoName }}(ctx context.Context,
 	reqContent := new({{ .Input }})
 
 	if err := codec.UnmarshalFrom(ctx, reqContent, req.Body); err != nil {
-		s.handleRequestBodyError(ctx, resp, "the request could not be decoded", err)
+		twerr := twirp.NewError(twirp.Malformed, "the request could not be decoded")
+		twerr = twerr.WithMeta("cause", err.Error())
+		s.writeError(ctx, resp, twerr)
 		return
 	}
 
@@ -504,12 +513,6 @@ func (s *{{ $service.GoName }}TwirpServer)call{{ .GoName }}(ctx context.Context,
 			return nil, err
 		}
 	}
-
-	//var respContent *{{ .Output }}
-	//func() {
-	//	defer twirpEnsurePanicResponses(ctx, resp, s.hooks)
-	//	respContent, err = handler(ctx, reqContent)
-	//}()
 
 	respContent, err := handler(ctx, reqContent)
 

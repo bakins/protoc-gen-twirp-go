@@ -4,6 +4,7 @@ package example
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -159,7 +160,7 @@ func twirpPanicInterceptor(method twirp.Method) twirp.Method {
 			if r := recover(); r != nil {
 				panicError := twirpErrFromPanic(r)
 				twerr := twirp.NewError(twirp.Internal, "internal service panic")
-				twerr = twirp.WrapError(twerr, panicError)
+				twerr = twerr.WithMeta("cause", panicError.Error())
 
 				resp = nil
 				err = twerr
@@ -167,6 +168,26 @@ func twirpPanicInterceptor(method twirp.Method) twirp.Method {
 		}()
 
 		resp, err = method(ctx, request)
+		return resp, err
+	}
+}
+
+func twirpContextInterceptor(method twirp.Method) twirp.Method {
+	return func(ctx context.Context, request interface{}) (interface{}, error) {
+		resp, err := method(ctx, request)
+
+		if errors.Is(err, context.Canceled) {
+			twerr := twirp.NewError(twirp.Canceled, "context cancelled")
+			twerr = twerr.WithMeta("cause", err.Error())
+			return nil, twerr
+		}
+
+		if errors.Is(err, context.DeadlineExceeded) {
+			twerr := twirp.NewError(twirp.DeadlineExceeded, "context deadline exceeded")
+			twerr = twerr.WithMeta("cause", err.Error())
+			return nil, twerr
+		}
+
 		return resp, err
 	}
 }
@@ -360,6 +381,7 @@ func NewHaberdasherTwirpServer(implementation HaberdasherTwirpService, opts ...i
 	}
 
 	interceptors = append(interceptors, twirpPanicInterceptor)
+	interceptors = append(interceptors, twirpContextInterceptor)
 
 	s := &HaberdasherTwirpServer{
 		implementation: implementation,
@@ -434,22 +456,6 @@ func (s *HaberdasherTwirpServer) getCodec(req *http.Request) (TwirpCodec, error)
 	return codec, nil
 }
 
-func (s *HaberdasherTwirpServer) handleRequestBodyError(ctx context.Context, resp http.ResponseWriter, msg string, err error) {
-	if context.Canceled == ctx.Err() {
-		s.writeError(ctx, resp, twirp.NewError(twirp.Canceled, "failed to read request: context canceled"))
-		return
-	}
-
-	if context.DeadlineExceeded == ctx.Err() {
-		s.writeError(ctx, resp, twirp.NewError(twirp.DeadlineExceeded, "failed to read request: deadline exceeded"))
-		return
-	}
-
-	twerr := twirp.WrapError(twirp.NewError(twirp.Malformed, msg), err)
-
-	s.writeError(ctx, resp, twerr)
-}
-
 func (s *HaberdasherTwirpServer) callMakeHat(ctx context.Context, resp http.ResponseWriter, req *http.Request) {
 	codec, err := s.getCodec(req)
 	if err != nil {
@@ -467,7 +473,9 @@ func (s *HaberdasherTwirpServer) callMakeHat(ctx context.Context, resp http.Resp
 	reqContent := new(Size)
 
 	if err := codec.UnmarshalFrom(ctx, reqContent, req.Body); err != nil {
-		s.handleRequestBodyError(ctx, resp, "the request could not be decoded", err)
+		twerr := twirp.NewError(twirp.Malformed, "the request could not be decoded")
+		twerr = twerr.WithMeta("cause", err.Error())
+		s.writeError(ctx, resp, twerr)
 		return
 	}
 
@@ -493,12 +501,6 @@ func (s *HaberdasherTwirpServer) callMakeHat(ctx context.Context, resp http.Resp
 			return nil, err
 		}
 	}
-
-	//var respContent *Hat
-	//func() {
-	//	defer twirpEnsurePanicResponses(ctx, resp, s.hooks)
-	//	respContent, err = handler(ctx, reqContent)
-	//}()
 
 	respContent, err := handler(ctx, reqContent)
 

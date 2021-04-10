@@ -63,6 +63,29 @@ func TestServerPanic(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, twirp.Internal, twerr.Code())
 	require.Equal(t, "internal service panic", twerr.Msg())
+	require.Equal(t, "very bad things happened", twerr.Meta("cause"))
+}
+
+func TestServerContext(t *testing.T) {
+	ts := NewHaberdasherTwirpServer(&contextHaberdasher{})
+	svr := httptest.NewServer(ts)
+	defer svr.Close()
+
+	c := NewHaberdasherProtobufClient(svr.URL, http.DefaultClient)
+
+	_, err := c.MakeHat(context.Background(), &Size{Inches: -1})
+	require.Error(t, err)
+	twerr, ok := err.(twirp.Error)
+	require.True(t, ok)
+	require.Equal(t, twirp.DeadlineExceeded, twerr.Code())
+	require.Equal(t, "context deadline exceeded", twerr.Msg())
+	require.Equal(t, "wrapped error: context deadline exceeded", twerr.Meta("cause"))
+}
+
+type contextHaberdasher struct{}
+
+func (h *contextHaberdasher) MakeHat(ctx context.Context, size *Size) (*Hat, error) {
+	return nil, fmt.Errorf("wrapped error: %w", context.DeadlineExceeded)
 }
 
 type panicHaberdasher struct{}
