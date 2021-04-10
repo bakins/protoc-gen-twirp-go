@@ -58,9 +58,11 @@ func (h *testHaberdasher) MakeHat(ctx context.Context, size *Size) (*Hat, error)
 	colors := []string{"white", "black", "brown", "red", "blue"}
 	names := []string{"bowler", "baseball cap", "top hat", "derby"}
 	return &Hat{
-		Size:  size.Inches,
+		Size: size.Inches,
+		// nolint: gosec
 		Color: colors[rand.Intn(len(colors))],
-		Name:  names[rand.Intn(len(names))],
+		// nolint: gosec
+		Name: names[rand.Intn(len(names))],
 	}, nil
 }
 
@@ -110,26 +112,6 @@ func BenchmarkOriginalerver(b *testing.B) {
 	benchmarkServer(b, ts)
 }
 
-func benchmarkClient(b *testing.B, client Haberdasher) {
-	b.ResetTimer()
-
-	b.RunParallel(func(pb *testing.PB) {
-		ctx := context.Background()
-
-		size := Size{
-			Inches: 14,
-		}
-
-		for pb.Next() {
-			_, err := client.MakeHat(ctx, &size)
-
-			if err != nil {
-				b.Error(err)
-			}
-		}
-	})
-}
-
 func BenchmarkNewClient(b *testing.B) {
 	b.ResetTimer()
 
@@ -152,7 +134,6 @@ func BenchmarkNewClient(b *testing.B) {
 
 		for pb.Next() {
 			_, err := c.MakeHat(ctx, &size)
-
 			if err != nil {
 				b.Error(err)
 			}
@@ -179,7 +160,6 @@ func BenchmarkOriginalClient(b *testing.B) {
 
 		for pb.Next() {
 			_, err := c.MakeHat(ctx, &size)
-
 			if err != nil {
 				b.Error(err)
 			}
